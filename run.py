@@ -28,7 +28,7 @@ class Joint:
         return True
 
     def distance(self, other_joint):
-        center_a = [(self.x_start + self.x_end) / 2, y_end]
+        center_a = [(self.x_start + self.x_end) / 2, self.y_end]
         center_b = [
             (other_joint.x_start + other_joint.x_end) / 2,
             other_joint.y_end,  # Pick *just* the bottom to pick the bottom center
@@ -103,13 +103,13 @@ def main(config):
                         continue
                     # Only check near-misses if at the same place
                     if path_a.cam_id == path_b.cam_id:
-                        # Only check near-misses if they're within the same minute
-                        if abs(path_a.detect_time - path_b.detect_time) <= 60:
+                        # Only check near-misses if they're within the same time period
+                        if abs(path_a.detect_time - path_b.detect_time) <= 15:
                             # Only print if there *is* a near-miss
                             if path_a.near_miss(path_b):
                                 print(
-                                    "Near miss detected between {} and {}".format(
-                                        path_a.label, path_b.label
+                                    "Near miss detected between {} and {} at {}".format(
+                                        path_a.label, path_b.label, path_a.cam_id
                                     )
                                 )
 
