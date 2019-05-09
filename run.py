@@ -42,8 +42,9 @@ class Joint:
 class Path:
     """A path object represents every location (and timestamp) of an object"""
 
-    def __init__(self, label, locations):
+    def __init__(self, label, cam_id, locations):
         self.label = label
+        self.cam_id = cam_id
         self.locations = locations
         self.create_time = time.time()
         self.detect_time = locations[0]["timestamp"]
@@ -93,33 +94,36 @@ def main(config):
                     if m.error():
                         continue
                     j = json.loads(m.value())
-                    paths.append(Path(j["label"], j["locations"]))
+                    paths.append(Path(j["label"], j["camera_id"], j["locations"]))
 
             # Test results against each other:
             for path_a in paths:
                 for path_b in paths:
                     if path_a == path_b:
                         continue
-                    # Only check near-misses if they're within the same minute
-                    if abs(path_a.detect_time - path_b.detect_time) <= 60:
-                        if path_a.near_miss(path_b):
-                            print(
-                                "Near miss detected between {} and {}".format(
-                                    path_a.label, path_b.label
+                    # Only check near-misses if at the same place
+                    if path_a.cam_id == path_b.cam_id:
+                        # Only check near-misses if they're within the same minute
+                        if abs(path_a.detect_time - path_b.detect_time) <= 60:
+                            # Only print if there *is* a near-miss
+                            if path_a.near_miss(path_b):
+                                print(
+                                    "Near miss detected between {} and {}".format(
+                                        path_a.label, path_b.label
+                                    )
                                 )
-                            )
 
             # Cleanup old vars
             for i in range(len(paths)):
                 # If it's older than 2 minutes
                 if time.time() - paths[i].create_time >= 120:
                     path_indices_to_del.append(i)
-
             for i in path_indices_to_del:
                 del paths[i]
-
             del msg, path_indices_to_del
-            time.sleep(1)  # Sleep so we don't thrash Kafka
+
+            # Sleep so we don't thrash Kafka
+            time.sleep(1)
         except KeyboardInterrupt:
             break
     consumer.close()
