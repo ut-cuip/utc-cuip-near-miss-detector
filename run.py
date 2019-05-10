@@ -118,8 +118,8 @@ def main(config):
                 # If it's older than 2 minutes
                 if time.time() - paths[i].create_time >= 120:
                     path_indices_to_del.append(i)
-            for i in path_indices_to_del:
-                del paths[i]
+            for i in reversed(path_indices_to_del):
+                paths.pop(i)
             del msg, path_indices_to_del
 
             # Sleep so we don't thrash Kafka
