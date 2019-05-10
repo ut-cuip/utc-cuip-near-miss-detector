@@ -7,9 +7,9 @@ import cv2
 import numpy as np
 import yaml
 from confluent_kafka import Consumer, KafkaException
+from datetime import datetime
 
 
-# x1 y1 x2 y2
 class Joint:
     def __init__(self, location, timestamp):
         self.x_start = location[0]
@@ -31,7 +31,7 @@ class Joint:
         center_a = [(self.x_start + self.x_end) / 2, self.y_end]
         center_b = [
             (other_joint.x_start + other_joint.x_end) / 2,
-            other_joint.y_end,  # Pick *just* the bottom to pick the bottom center
+            other_joint.y_end,  # Pick *just* the bottom to get the bottom center
         ]
 
         return math.sqrt(
@@ -54,14 +54,36 @@ class Path:
         for joint_a in self.joints:
             for joint_b in other_path.joints:
                 if joint_a.overlaps(joint_b):
+                    self.draw(other_path)
                     return True
                 elif joint_a.distance(joint_b) <= threshold:
+                    self.draw(other_path)
                     return True
         return False
 
-    # def draw(self):
-    #     img = np.zeros((1080, 1920, 4), np.uint8)
-    #     for loc in locations:
+    def draw(self, other_path):
+        """Draws the two paths together and saves to an image"""
+        img = np.zeros((1080, 1920, 4), np.uint8)
+        for joint in self.joints:
+            cv2.rectangle(
+                img,
+                (joint.x_start, joint.y_start),
+                (joint.x_end, joint.y_end),
+                (255, 0, 0),
+            )
+        for joint in other_path.joints:
+            cv2.rectangle(
+                img,
+                (joint.x_start, joint.y_start),
+                (joint.x_end, joint.y_end),
+                (0, 0, 255),
+            )
+        cv2.imwrite(
+            "./images/{}_{}.png".format(
+                self.cam_id, datetime.fromtimestamp(time.time())
+            ),
+            img,
+        )
 
 
 def main(config):
@@ -98,20 +120,26 @@ def main(config):
 
             # Test results against each other:
             for path_a in paths:
+                found = False
                 for path_b in paths:
                     if path_a == path_b:
                         continue
                     # Only check near-misses if at the same place
                     if path_a.cam_id == path_b.cam_id:
                         # Only check near-misses if they're within the same time period
-                        if abs(path_a.detect_time - path_b.detect_time) <= 15:
+                        if abs(path_a.detect_time - path_b.detect_time) <= 5:
                             # Only print if there *is* a near-miss
-                            if path_a.near_miss(path_b):
+                            if path_a.near_miss(path_b, threshold=20):
                                 print(
                                     "Near miss detected between {} and {} at {}".format(
                                         path_a.label, path_b.label, path_a.cam_id
                                     )
                                 )
+                                # Break here because there's little chance it happens again with the same vehicle
+                                found = True
+                                break
+                if found:
+                    break
 
             # Cleanup old vars
             for i in range(len(paths)):
