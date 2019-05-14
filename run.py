@@ -54,12 +54,14 @@ class Path:
     def near_miss(self, other_path, threshold=30):
         for joint_a in self.joints:
             for joint_b in other_path.joints:
-                if joint_a.overlaps(joint_b):
-                    self.draw(other_path)
-                    return True
-                elif joint_a.distance(joint_b) <= threshold:
-                    self.draw(other_path)
-                    return True
+                # Only check this joint if they occurred within 3 seconds of each other
+                if abs(joint_a.timestamp - joint_b.timestamp) <= 3
+                    if joint_a.overlaps(joint_b):
+                        self.draw(other_path)
+                        return True
+                    elif joint_a.distance(joint_b) <= threshold:
+                        self.draw(other_path)
+                        return True
         return False
 
     def draw(self, other_path):
@@ -130,18 +132,16 @@ def main(config):
                         continue
                     # Only check near-misses if at the same place
                     if path_a.cam_id == path_b.cam_id:
-                        # Only check near-misses if they're within the same time period
-                        if abs(path_a.detect_time - path_b.detect_time) <= 5:
-                            # Only print if there *is* a near-miss
-                            if path_a.near_miss(path_b, threshold=20):
-                                print(
-                                    "Near miss detected between {} and {} at {}".format(
-                                        path_a.label, path_b.label, path_a.cam_id
-                                    )
+                        # Only print if there *is* a near-miss
+                        if path_a.near_miss(path_b, threshold=20):
+                            print(
+                                "Near miss detected between {} and {} at {}".format(
+                                    path_a.label, path_b.label, path_a.cam_id
                                 )
-                                # Break here because there's little chance it happens again with the same vehicle
-                                found = True
-                                break
+                            )
+                            # Break here because there's little chance it happens again with the same vehicle
+                            found = True
+                            break
                 if found:
                     break
 
