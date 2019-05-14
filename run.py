@@ -2,12 +2,12 @@ import json
 import math
 import os
 import time
+from datetime import datetime
 
 import cv2
 import numpy as np
 import yaml
 from confluent_kafka import Consumer, KafkaException
-from datetime import datetime
 
 
 class Joint:
@@ -35,8 +35,7 @@ class Joint:
         ]
 
         return math.sqrt(
-            ((center_b[0] - center_a[0]) ** 2) +
-            ((center_b[1] - center_a[1]) ** 2)
+            ((center_b[0] - center_a[0]) ** 2) + ((center_b[1] - center_a[1]) ** 2)
         )
 
 
@@ -51,7 +50,7 @@ class Path:
         self.detect_time = locations[0]["timestamp"]
         self.joints = [Joint(x["coords"], x["timestamp"]) for x in locations]
 
-    def near_miss(self, other_path, threshold=30):
+    def near_miss(self, other_path, min_threshold=15, max_threshold=50):
         for joint_a in self.joints:
             for joint_b in other_path.joints:
                 # Only check this joint if they occurred within 3 seconds of each other
@@ -59,7 +58,10 @@ class Path:
                     if joint_a.overlaps(joint_b):
                         self.draw(other_path)
                         return True
-                    elif joint_a.distance(joint_b) <= threshold:
+                    elif (
+                        joint_a.distance(joint_b) >= min_threshold
+                        and joint_a.distance(joint_b) <= max_threshold
+                    ):
                         self.draw(other_path)
                         return True
         return False
@@ -73,7 +75,7 @@ class Path:
                 (int(joint.x_start), int(joint.y_start)),
                 (int(joint.x_end), int(joint.y_end)),
                 (255, 0, 0),
-                2
+                2,
             )
         for joint in other_path.joints:
             cv2.rectangle(
@@ -81,7 +83,7 @@ class Path:
                 (int(joint.x_start), int(joint.y_start)),
                 (int(joint.x_end), int(joint.y_end)),
                 (0, 0, 255),
-                2
+                2,
             )
         cv2.imwrite(
             "./images/{}_{}.png".format(
@@ -121,8 +123,7 @@ def main(config):
                     if m.error():
                         continue
                     j = json.loads(m.value())
-                    paths.append(
-                        Path(j["label"], j["camera_id"], j["locations"]))
+                    paths.append(Path(j["label"], j["camera_id"], j["locations"]))
 
             # Test results against each other:
             for path_a in paths:
