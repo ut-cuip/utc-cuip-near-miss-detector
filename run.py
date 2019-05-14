@@ -66,7 +66,7 @@ class Path:
 
     def draw(self, other_path):
         """Draws the two paths together and saves to an image"""
-        img = np.zeros((1080, 1920, 4), np.uint8)
+        img = np.zeros((1080, 1920, 3), np.uint8)
         for joint in self.joints:
             cv2.rectangle(
                 img,
