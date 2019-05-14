@@ -55,7 +55,7 @@ class Path:
         for joint_a in self.joints:
             for joint_b in other_path.joints:
                 # Only check this joint if they occurred within 3 seconds of each other
-                if abs(joint_a.timestamp - joint_b.timestamp) <= 3
+                if abs(joint_a.timestamp - joint_b.timestamp) <= 3:
                     if joint_a.overlaps(joint_b):
                         self.draw(other_path)
                         return True
