@@ -43,19 +43,20 @@ class FrameBufferer:
         for timestamp in self.frames:
             if time.time() - timestamp >= time_threshold:
                 to_del.append(timestamp)
-            # break  # Told you it was lazy
-        
+            break  # Told you it was lazy
+
         to_del.reverse()
-        
+
         for x in to_del:
             del self.frames[x]
-        
+
         del to_del
 
     def loop(self):
         """Starts the loop for grabbing and updating video feeds"""
         cap = cv2.VideoCapture()
         cap.open(self.url)
+        last_trim = time.time()
         while not self.should_stop:
             while self.should_run:
                 loop_start_time = time.time()
@@ -64,8 +65,10 @@ class FrameBufferer:
                     break
 
                 self.frames[time.time()] = frame
-
-                self.trim()
+                
+                if time.time() - last_trim >= 10:  # only trim every 10s:
+                    self.trim()
+                    last_trim = time.time()
 
                 if (time.time() - loop_start_time) < (1 / 30):
                     time.sleep(((1 / 30) - (time.time() - loop_start_time)))
