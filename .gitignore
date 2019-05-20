@@ -14,4 +14,4 @@
 **/*.swp
 submissions.json
 ./images
-./images/*
+images/*
