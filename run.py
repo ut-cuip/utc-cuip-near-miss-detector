@@ -1,96 +1,12 @@
 import json
-import math
 import os
 import time
-from datetime import datetime
 
-import cv2
-import numpy as np
 import yaml
 from confluent_kafka import Consumer, KafkaException
 
-
-class Joint:
-    def __init__(self, location, timestamp):
-        self.x_start = location[0]
-        self.y_start = location[1]
-        self.x_end = location[2]
-        self.y_end = location[3]
-        self.timestamp = timestamp
-
-    def overlaps(self, other_joint):
-        if self.x_start > other_joint.x_end or other_joint.x_start > self.x_end:
-            return False
-
-        if self.y_start < other_joint.y_end or other_joint.y_start < self.y_end:
-            return False
-
-        return True
-
-    def distance(self, other_joint):
-        center_a = [(self.x_start + self.x_end) / 2, self.y_end]
-        center_b = [
-            (other_joint.x_start + other_joint.x_end) / 2,
-            other_joint.y_end,  # Pick *just* the bottom to get the bottom center
-        ]
-
-        return math.sqrt(
-            ((center_b[0] - center_a[0]) ** 2) + ((center_b[1] - center_a[1]) ** 2)
-        )
-
-
-class Path:
-    """A path object represents every location (and timestamp) of an object"""
-
-    def __init__(self, label, cam_id, locations):
-        self.label = label
-        self.cam_id = cam_id
-        self.locations = locations
-        self.create_time = time.time()
-        self.detect_time = locations[0]["timestamp"]
-        self.joints = [Joint(x["coords"], x["timestamp"]) for x in locations]
-
-    def near_miss(self, other_path, min_threshold=15, max_threshold=50):
-        for joint_a in self.joints:
-            for joint_b in other_path.joints:
-                # Only check this joint if they occurred within 3 seconds of each other
-                if abs(joint_a.timestamp - joint_b.timestamp) <= 3:
-                    if joint_a.overlaps(joint_b):
-                        self.draw(other_path)
-                        return True
-                    elif (
-                        joint_a.distance(joint_b) >= min_threshold
-                        and joint_a.distance(joint_b) <= max_threshold
-                    ):
-                        self.draw(other_path)
-                        return True
-        return False
-
-    def draw(self, other_path):
-        """Draws the two paths together and saves to an image"""
-        img = np.zeros((1080, 1920, 3), np.uint8)
-        for joint in self.joints:
-            cv2.rectangle(
-                img,
-                (int(joint.x_start), int(joint.y_start)),
-                (int(joint.x_end), int(joint.y_end)),
-                (255, 0, 0),
-                2,
-            )
-        for joint in other_path.joints:
-            cv2.rectangle(
-                img,
-                (int(joint.x_start), int(joint.y_start)),
-                (int(joint.x_end), int(joint.y_end)),
-                (0, 0, 255),
-                2,
-            )
-        cv2.imwrite(
-            "./images/{}_{}.png".format(
-                self.cam_id, datetime.fromtimestamp(time.time())
-            ),
-            img,
-        )
+from frame_bufferer import FrameBufferer
+from object import Object
 
 
 def main(config):
@@ -108,14 +24,21 @@ def main(config):
     )
     consumer.subscribe([config["kafka"][0]["topic"]])
 
-    paths = []
+    objects = []
+    buffers = {
+        config["cameras"][x]["camera_id"]: FrameBufferer(config["cameras"][x]["url"])
+        for x in range(len(config["cameras"]))
+    }
+    
+    for cam_id in buffers:
+        buffers[cam_id].start()
 
     while True:
         try:
             consumer.poll(1)
             msg = consumer.consume()
-            # Clean up old paths
-            path_indices_to_del = []
+            # Clean up old objects
+            object_indices_to_del = []
 
             # Get data from Kafka
             if msg is not None:
@@ -123,21 +46,21 @@ def main(config):
                     if m.error():
                         continue
                     j = json.loads(m.value())
-                    paths.append(Path(j["label"], j["camera_id"], j["locations"]))
+                    objects.append(Object(j["label"], j["camera_id"], j["locations"]))
 
             # Test results against each other:
-            for path_a in paths:
+            for object_a in objects:
                 found = False
-                for path_b in paths:
-                    if path_a == path_b:
+                for object_b in object:
+                    if object_a == object_b:
                         continue
                     # Only check near-misses if at the same place
-                    if path_a.cam_id == path_b.cam_id:
+                    if object_a.cam_id == object_b.cam_id:
                         # Only print if there *is* a near-miss
-                        if path_a.near_miss(path_b, threshold=20):
+                        if object_a.near_miss(object_b, threshold=20):
                             print(
                                 "Near miss detected between {} and {} at {}".format(
-                                    path_a.label, path_b.label, path_a.cam_id
+                                    object_a.label, object_b.label, object_a.cam_id
                                 )
                             )
                             # Break here because there's little chance it happens again with the same vehicle
@@ -147,13 +70,13 @@ def main(config):
                     break
 
             # Cleanup old vars
-            for i in range(len(paths)):
+            for i in range(len(objects)):
                 # If it's older than 2 minutes
-                if time.time() - paths[i].create_time >= 120:
-                    path_indices_to_del.append(i)
-            for i in reversed(path_indices_to_del):
-                paths.pop(i)
-            del msg, path_indices_to_del
+                if time.time() - objects[i].create_time >= 120:
+                    object_indices_to_del.append(i)
+            for i in reversed(object_indices_to_del):
+                objects.pop(i)
+            del msg, object_indices_to_del
 
             # Sleep so we don't thrash Kafka
             time.sleep(1)
