@@ -31,6 +31,28 @@ class FrameBufferer:
         self.should_run = False
         self.should_stop = True
 
+    def find_frame(self, timestamp):
+        """
+        Finds the frame closest to the timestamp given
+        Args:
+            timestamp (float): The timestamp to search for
+        """
+        if list(self.frames.items()):
+            best_ts = list(self.frames.items())[0][0]
+            best_diff = abs(timestamp - best_ts)
+
+            for ts in self.frames:
+                if abs(ts - timestamp) < best_diff:
+                    best_ts = ts
+                    best_diff = abs(ts - timestamp)
+
+            return self.frames[best_ts]
+        else:
+            print("Waiting for frames")
+            time.sleep(0.01)
+            return self.find_frame(timestamp)
+
+
     def trim(self, time_threshold=120):
         """
         Trims old frames from the beginning of the dict
@@ -70,10 +92,6 @@ class FrameBufferer:
 
                 if (time.time() - loop_start_time) < (1 / 30):
                     time.sleep(((1 / 30) - (time.time() - loop_start_time)))
-                else:
-                    print(
-                        "Loop took longer than 1/30th of a second. May experience continued delays."
-                    )
 
                 # Clean up in case GC doesn't
                 del ret, frame, loop_start_time
