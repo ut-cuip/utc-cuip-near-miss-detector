@@ -52,7 +52,6 @@ class FrameBufferer:
             time.sleep(0.01)
             return self.find_frame(timestamp)
 
-
     def trim(self, time_threshold=120):
         """
         Trims old frames from the beginning of the dict
@@ -65,23 +64,23 @@ class FrameBufferer:
             if time.time() - timestamp >= time_threshold:
                 to_del.append(timestamp)
 
-        to_del.reverse()
-
-        for x in to_del:
+        for x in reversed(to_del):
             del self.frames[x]
 
         del to_del
 
     def loop(self):
         """Starts the loop for grabbing and updating video feeds"""
-        cap = cv2.VideoCapture()
-        cap.open(self.url)
-        last_trim = time.time()
         while not self.should_stop:
+            last_trim = time.time()
+            cap = cv2.VideoCapture()
+            cap.open(self.url)
             while self.should_run:
-                loop_start_time = time.time()
+                start = time.time()
                 ret, frame = cap.read()
                 if not ret:
+                    cap.release()
+                    del cap
                     break
 
                 self.frames[time.time()] = frame
@@ -90,11 +89,10 @@ class FrameBufferer:
                     self.trim()
                     last_trim = time.time()
 
-                if (time.time() - loop_start_time) < (1 / 30):
-                    time.sleep(((1 / 30) - (time.time() - loop_start_time)))
+                time.sleep(max((1 / 30) - (time.time() - start), 0))
 
                 # Clean up in case GC doesn't
-                del ret, frame, loop_start_time
+                del ret, frame, start
 
             time.sleep(10)
 
