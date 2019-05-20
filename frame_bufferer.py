@@ -39,11 +39,9 @@ class FrameBufferer:
         """
         to_del = []
 
-        # Lazy way to get first item in dict:
         for timestamp in self.frames:
             if time.time() - timestamp >= time_threshold:
                 to_del.append(timestamp)
-            break  # Told you it was lazy
 
         to_del.reverse()
 
@@ -65,7 +63,7 @@ class FrameBufferer:
                     break
 
                 self.frames[time.time()] = frame
-                
+
                 if time.time() - last_trim >= 10:  # only trim every 10s:
                     self.trim()
                     last_trim = time.time()
