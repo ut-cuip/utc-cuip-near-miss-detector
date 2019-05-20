@@ -20,7 +20,7 @@ class Object:
         self.locations = locations
         self.create_time = time.time()
         self.detect_time = locations[0]["timestamp"]
-        self.joints = [Joint(x["coords"], x["timestamp"]) for x in locations]
+        self.joints = [self.Joint(x["coords"], x["timestamp"]) for x in locations]
 
     def near_miss(self, other_object, min_threshold=15, max_threshold=50):
         """
@@ -35,13 +35,11 @@ class Object:
                 # Only check this joint if they occurred within 3 seconds of each other
                 if abs(joint_a.timestamp - joint_b.timestamp) <= 3:
                     if joint_a.overlaps(joint_b):
-                        self.draw(other_object)
                         return True
                     elif (
                         joint_a.distance(joint_b) >= min_threshold
                         and joint_a.distance(joint_b) <= max_threshold
                     ):
-                        self.draw(other_object)
                         return True
         return False
 
