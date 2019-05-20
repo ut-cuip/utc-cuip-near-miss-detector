@@ -29,7 +29,7 @@ def main(config):
         config["cameras"][x]["camera_id"]: FrameBufferer(config["cameras"][x]["url"])
         for x in range(len(config["cameras"]))
     }
-    
+
     for cam_id in buffers:
         buffers[cam_id].start()
 
@@ -51,19 +51,30 @@ def main(config):
             # Test results against each other:
             for object_a in objects:
                 found = False
-                for object_b in object:
+                for object_b in objects:
                     if object_a == object_b:
                         continue
                     # Only check near-misses if at the same place
                     if object_a.cam_id == object_b.cam_id:
                         # Only print if there *is* a near-miss
-                        if object_a.near_miss(object_b, threshold=20):
-                            print(
-                                "Near miss detected between {} and {} at {}".format(
-                                    object_a.label, object_b.label, object_a.cam_id
+                        if object_a.near_miss(object_b):
+                            # Find the average of the two items' creation times
+                            avg_timestamp = (
+                                min(object_a.detect_time, object_b.detect_time)
+                                + (
+                                    max(object_a.detect_time, object_b.detect_time)
+                                    - min(object_a.detect_time, object_b.detect_time)
                                 )
+                                / 2
                             )
-                            # Break here because there's little chance it happens again with the same vehicle
+                            # Draw it using the found frame from the buffer
+                            object_a.draw(
+                                buffers[object_a.cam_id].find_frame(avg_timestamp),
+                                object_b,
+                            )
+                            # delete the objects and break
+                            object_indices_to_del.append(objects.index(object_a))
+                            object_indices_to_del.append(objects.index(object_b))
                             found = True
                             break
                 if found:
@@ -71,11 +82,14 @@ def main(config):
 
             # Cleanup old vars
             for i in range(len(objects)):
-                # If it's older than 2 minutes
                 if time.time() - objects[i].create_time >= 120:
                     object_indices_to_del.append(i)
+
+            object_indices_to_del.sort()
+
             for i in reversed(object_indices_to_del):
                 objects.pop(i)
+
             del msg, object_indices_to_del
 
             # Sleep so we don't thrash Kafka
