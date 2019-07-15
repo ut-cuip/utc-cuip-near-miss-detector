@@ -1,18 +1,30 @@
 [[source]]
-name = "pypi"
 url = "https://pypi.org/simple"
 verify_ssl = true
-
-[dev-packages]
-black = "*"
-autopep8 = "*"
-rope = "*"
-pylint = "*"
+name = "pypi"
 
 [packages]
-confluent-kafka = "*"
-pyyaml = "*"
 opencv-python = "*"
+cython = "*"
+confluent-kafka = "*"
+torch = "*"
+torchvision = "*"
+numba = "*"
+scikit-image = "*"
+sklearn = "*"
+filterpy = "*"
+numpy = "*"
+pyyaml = "*"
+logbook = "*"
+quart = "*"
+cryptography = "*"
+Jinja2 = ">=2.10.1"
+
+
+[dev-packages]
+pylint = "*"
+rope = "*"
+black = "*"
 
 [requires]
 python_version = "3.6.5"

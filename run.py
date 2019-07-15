@@ -1,109 +1,196 @@
-import json
-import os
+import datetime
+import multiprocessing
 import time
 
-import yaml
-from confluent_kafka import Consumer, KafkaException
+import cv2
+import numpy as np
 
-from frame_bufferer import FrameBufferer
-from object import Object
+from pytorch_yolo.yolo import YOLO
+from utils.sort import Sort
+from trajectory import predict_location, time_til_collision
+from utils.utils import distance_from_xy
 
 
-def main(config):
-    """
-    The main program loop which reads in Kafka items and processes them
-
-    Args:
-        config (pyyaml config): The main config file for this application
-    """
-    consumer = Consumer(
-        {
-            "bootstrap.servers": config["kafka"][0]["bootstrap-servers"],
-            "group.id": "near-miss-detection",
-        }
-    )
-    consumer.subscribe([config["kafka"][0]["topic"]])
-
-    objects = []
-    buffers = {
-        config["cameras"][x]["camera_id"]: FrameBufferer(config["cameras"][x]["url"])
-        for x in range(len(config["cameras"]))
-    }
-
-    for cam_id in buffers:
-        buffers[cam_id].start()
-
+def cap_worker(cap_queue):
     while True:
-        try:
-            consumer.poll(1)
-            msg = consumer.consume()
-            # Clean up old objects
-            object_indices_to_del = []
+        cap = cv2.VideoCapture()
+        cap.open(
+            "rtsp://consumer:IyKv4uY7%g^8@10.199.51.162/axis-media/media.amp?streamprofile=H264-OpenCV-Optimized"
+        )
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                cap.release()
+                del cap
+                time.sleep(10)
+                break
+            else:
+                frame = frame[128 : frame.shape[0], 0 : frame.shape[1]]
+                original_dim = frame.shape
+                dimension = (
+                    frame.shape[0]
+                    if (frame.shape[0] > frame.shape[1])
+                    else frame.shape[1]
+                )
+                tmp = np.zeros((dimension, dimension, 3), np.uint8)
+                tmp[0 : original_dim[0]] = frame
+                del frame
+                cap_queue.put((tmp, original_dim), block=True)
 
-            # Get data from Kafka
-            if msg is not None:
-                for m in msg:
-                    if m.error():
-                        continue
-                    j = json.loads(m.value())
-                    objects.append(Object(j["label"], j["camera_id"], j["locations"]))
 
-            # Test results against each other:
-            for object_a in objects:
-                found = False
-                for object_b in objects:
-                    if object_a == object_b:
-                        continue
-                    # Only check near-misses if at the same place
-                    if object_a.cam_id == object_b.cam_id:
-                        # Only print if there *is* a near-miss
-                        if object_a.near_miss(object_b):
-                            # Find the average of the two items' creation times
-                            avg_timestamp = (
-                                min(object_a.detect_time, object_b.detect_time)
-                                + (
-                                    max(object_a.detect_time, object_b.detect_time)
-                                    - min(object_a.detect_time, object_b.detect_time)
-                                )
-                                / 2
+def main(cap_queue):
+    
+    yolo = YOLO(res="1024")
+    sort = Sort(iou_threshold=0.05)
+    whitelist = [
+        "person",
+        "bicycle",
+        "car",
+        "motorbike",
+        "aeroplane",
+        "bus",
+        "truck",
+        "boat",
+        "fire hydrant",
+        "stop sign",
+        "parking meter",
+        "bird",
+        "cat",
+        "dog",
+        "backpack",
+        "umbrella",
+        "handbag",
+        "suitcase",
+    ]
+    frames = 0
+    while True:
+        frame, original_dim = cap_queue.get(block=True)
+        frames += 1
+        outputs = yolo.get_results(frame)
+        detections = []
+        labels = []
+
+        for output in outputs:
+            label = yolo.classes[int(output[-1])]
+            if not label in whitelist:
+                del label
+                continue
+
+            tl = tuple(output[1:3].int())
+            br = tuple(output[3:5].int())
+
+            detections.append(
+                np.array([tl[0].item(), tl[1].item(), br[0].item(), br[1].item()])
+            )
+            labels.append(label)
+
+            del tl, br, label
+        del outputs
+
+        detections = np.array(detections)
+        should_write = False
+
+        if detections.shape[0] > 0:
+            try:
+                alive, _ = sort.update(detections, labels)
+            except IndexError:
+                del frame, detections, labels
+                continue
+
+            should_write = False
+            for trk in alive:
+                t = trk.get_state()[0]
+                try:
+                    bbox = [int(t[0]), int(t[1]), int(t[2]), int(t[3])]
+                except ValueError:
+                    continue
+                cv2.rectangle(
+                    frame,
+                    (int(bbox[0]), int(bbox[1])),
+                    (int(bbox[2]), int(bbox[3])),
+                    trk.color,
+                    2,
+                )
+                cv2.putText(
+                    frame,
+                    "{}:id {}".format(trk.get_label(), str(trk.id)),
+                    (int(bbox[0]), int(bbox[1]) - 12),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.0005 * frame.shape[0],
+                    trk.color,
+                    2,
+                )
+                for location in trk.locations:
+                    x1, y1, x2, y2 = location[1]
+                    cv2.circle(
+                        frame, (((int(x1) + int(x2)) // 2), int(y2)), 3, trk.color, -1
+                    )
+                    del x1, y1, x2, y2
+
+                pred_x, pred_y = predict_location(trk, amount_to_predict=10)
+                center_x = (int(bbox[0]) + int(bbox[2])) // 2
+                center_y = (int(bbox[1]) + int(bbox[3])) // 2
+                cv2.line(
+                    frame,
+                    (int(pred_x), int(pred_y)),
+                    (center_x, center_y),
+                    trk.color,
+                    8,
+                )
+                # text = "{}".format(
+                #     distance_from_xy((center_x, center_y), (int(pred_x), int(pred_y)))
+                # )
+                # midpoint = ((center_x + pred_x) // 2, (center_y + pred_y) // 2)
+                # cv2.putText(frame, text, (int(midpoint[0]), int(midpoint[1])), cv2.FONT_HERSHEY_SIMPLEX, 1, trk.color)
+                if len(alive) > 1:
+                    for trk2 in alive:
+                        if trk.id == trk2.id:
+                            continue
+                    ttc = time_til_collision(trk, trk2)
+                    ttc_thresh = 5
+                    if ttc > 0 and ttc < ttc_thresh:
+
+                        print(
+                            "Potential accident between ID {} and {}.\nTTC:{}s".format(
+                                trk.id, trk2.id, ttc
                             )
-                            # Draw it using the found frame from the buffer
-                            object_a.draw(
-                                buffers[object_a.cam_id].find_frame(avg_timestamp),
-                                object_b,
-                            )
-                            # delete the objects and break
-                            object_indices_to_del.append(objects.index(object_a))
-                            object_indices_to_del.append(objects.index(object_b))
-                            found = True
-                            break
-                if found:
-                    break
+                        )
+                        cv2.putText(
+                            frame,
+                            "ID {} and {} have TTC {}".format(trk.id, trk2.id, ttc),
+                            (0, 20),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            1,
+                            (0, 0, 255),
+                        )
+                        should_write = True
+                    del ttc_thresh, ttc
 
-            # Cleanup old vars
-            for i in range(len(objects)):
-                if time.time() - objects[i].create_time >= 120:
-                    object_indices_to_del.append(i)
+                del t, bbox, pred_x, pred_y, center_x, center_y
+        # write_queue.put(frame[0 : original_dim[0], 0 : original_dim[1]])
+        cv2.imshow("Object Tracking", frame[0 : original_dim[0], 0 : original_dim[1]])
 
-            object_indices_to_del.sort()
-
-            for i in reversed(object_indices_to_del):
-                objects.pop(i)
-
-            del msg, object_indices_to_del
-
-            # Sleep so we don't thrash Kafka
-            time.sleep(1)
-        except KeyboardInterrupt:
-            break
-    consumer.close()
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord("q"):
+            raise KeyboardInterrupt
+        del should_write
 
 
 if __name__ == "__main__":
-    if os.path.exists("config.yaml"):
-        with open("config.yaml") as file:
-            config = yaml.load(file.read(), Loader=yaml.Loader)
-        main(config)
-    else:
-        print("No config file found")
-        exit()
+    multiprocessing.set_start_method("spawn", force=True)
+    cap_queue = multiprocessing.Queue(1)
+    processes = []
+    processes.append(
+        multiprocessing.Process(target=main, args=(cap_queue,))
+    )
+    processes.append(multiprocessing.Process(target=cap_worker, args=(cap_queue,)))
+
+    try:
+        for process in processes:
+            process.start()
+        for process in processes:
+            process.join()
+    except KeyboardInterrupt:
+        for process in processes:
+            process.terminate()
